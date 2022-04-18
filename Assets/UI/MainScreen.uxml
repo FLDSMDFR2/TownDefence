@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement name="Screen" style="flex-grow: 1;&#10;">
+        <Style src="MainScreen.uss" />
+        <ui:Button text="Button" name="TestButton" style="height: 98px;&#10;width: 110px;&#10;" />
+    </ui:VisualElement>
+</ui:UXML>

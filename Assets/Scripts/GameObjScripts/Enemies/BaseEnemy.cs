@@ -4,26 +4,32 @@ using UnityEngine;
 
 public class BaseEnemy : BaseDestructibleObj
 {
-    public float MovementSpeed = 1f;
-    public float DamageDealt = 1f;
-    public float AttackSpeed = 2f;
-    private float attackCount = 0f;
+    [Header("Base Enemy")]
+    public int Level;
+    public int Worth;
+    public float DamageDealt;
+    public float AttackSpeed;
+    public float MovementSpeed;
 
+    [Header("Base Enemy Set Up")]
     public Vector3 Direction;
     public Vector3 StartPos;
     public Vector3 EndPos;
 
     private GameObject target;
+    private float attackCount = 0f;
+    private EnemyColor enemyColor;
 
-    void Start()
+    protected override void Awake()
     {
-        Physics.IgnoreCollision(this.GetComponent<Collider>(), GetComponent<Collider>());
+        base.Awake();
+        enemyColor = GetComponent<EnemyColor>();
     }
 
     // Update is called once per frame
-    void Update()
+    void FixedUpdate()
     {
-        
+
         if (Die())
             return;
 
@@ -33,13 +39,12 @@ public class BaseEnemy : BaseDestructibleObj
         Move();
     }
 
-
-
     protected override bool Die()
     {
-        if (Health <= 0f || CheckEndPos())
+        bool isAtEnd = CheckEndPos();
+        if (CurrentHealth <= 0f  || isAtEnd)
         {
-            DeathHandling();
+            if (!isAtEnd) DeathHandling();
             Destroy(gameObject);
             return true;
         }
@@ -47,10 +52,19 @@ public class BaseEnemy : BaseDestructibleObj
         return false;
     }
 
+    protected override void DeathHandling()
+    {
+        base.DeathHandling();
+
+        WaveCompleteUIManager.Instance.EnemiesKilledPerWave += 1;
+        WaveCompleteUIManager.Instance.EnemiesKilledTotalWorth += Worth;
+
+        //PlayerStats.Money += Worth;
+    }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (target == null && other.GetComponent<BaseBuilding>() != null)
+        if (target == null && other.GetComponent<BaseStructure>() != null)
         {
             target = other.gameObject;
         }
@@ -63,14 +77,15 @@ public class BaseEnemy : BaseDestructibleObj
             if (attackCount <= 0f)
             {
 
-                BaseDestructibleObj obj = target.GetComponent<BaseDestructibleObj>();
-                if (obj != null)
+                BaseStructure obj = target.GetComponent<BaseStructure>();
+                if (obj != null && !obj.IsDestroyed)
                 {
                     obj.TakeDamage(DamageDealt);
                 }
                 else
                 {
                     target = null;
+                    return false;
                 }
 
                 attackCount = AttackSpeed;
@@ -111,6 +126,29 @@ public class BaseEnemy : BaseDestructibleObj
         else
         {
             return (transform.position.x <= EndPos.x);
+        }
+    }
+
+    public virtual void SetLevel(int level)
+    {
+        // set level
+        Level = level;
+
+        // set speed for level
+        //Data.MovementSpeed = level;
+
+        // set damage for level
+        DamageDealt = 1 + (level*.5f);
+
+        // set health for level
+        MaxHealth = CurrentHealth = 30 + (level * .5f);
+
+        TakeDamage(0);
+
+        //set color for this level
+        if (enemyColor != null)
+        {
+            GetComponent<Renderer>().material.color = enemyColor.GetEnemeyColorByLevel(Level);
         }
     }
 }

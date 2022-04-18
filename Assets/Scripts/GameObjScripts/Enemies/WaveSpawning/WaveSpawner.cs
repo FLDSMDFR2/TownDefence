@@ -2,86 +2,197 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+
 public class WaveSpawner : MonoBehaviour   
 {
-    public static WaveSpawner Instance;
+    [Header("WaveSpawner")]
+    public List<WaveEnemy> Enemies;
+    public float TimeBetweenWaves = 20f;
+    public float TimebetweenEnemies = .8f;
+    public bool InfiniteWaveMode = false;
 
-    public bool WavesEnabled = false;
-    public GameObject Enemies;
-    public float TimeBetweenWaves = 5f;
-    public float TotalWaves = 1f;
-    private float waveCount = 0f;
-    private float enemiesPerWave = 5f;
+    protected float countdown = 20f;
+    protected bool WavesEnabled = false;
+    protected int currentWaveNumber = 0;
+    protected int enemiesPerWaveStart = 5;
+    protected int enemiesPerWave = 0;
+    protected float enemiesSpawned = 0f;
+    protected bool waveSpawned = false;
 
-    private ArrayList ActiveEnemies = new ArrayList();
-    private float countdown = 5f;
+    protected List<FloorData> spawnLocations;
+    protected List<BaseEnemy> enemiesSpawnedList = new List<BaseEnemy>();
+    protected float maxX;
+    protected float maxZ;
 
-    private List<MapLocation> spawnLocations;
-    private float maxX;
-    private float maxZ;
+    protected float fixedUpdateCheckCountdown = 20f;
+    public float TimebetweenFixedUpdateCheck = 1f;
 
-    void Awake()
+    void FixedUpdate()
     {
-        if (Instance != null)
+
+        if (!WavesEnabled)
         {
-            TraceManager.WriteTrace(TraceChannel.Main, TraceType.error, "Multi WaveSpawner");
+            SetDisplyText("", "");
             return;
         }
-        Instance = this;
+
+        // once we start a wave only run update at intervel
+        if (waveSpawned && fixedUpdateCheckCountdown >= 0)
+        {
+            fixedUpdateCheckCountdown -= Time.deltaTime;
+            return;
+        }
+        fixedUpdateCheckCountdown = TimebetweenFixedUpdateCheck;
+
+        if (!CanContinue())
+        {
+            SetDisplyText("", "");
+            EndWaveCleanUp();
+            WaveCompleteUIManager.Instance.ShowWaveComplete(false);
+            return;
+        }
+
+        if (waveSpawned && IsWaveComplete())
+        {
+            if (InfiniteWaveMode)
+            {
+                StartNextWave();
+            }
+            else
+            {
+                SetDisplyText("", "");
+                EndWaveCleanUp();
+                WaveCompleteUIManager.Instance.ShowWaveComplete(true);
+            }
+
+            return;
+        }
+
+        if (!waveSpawned)
+        {
+            //Display.text = "Wave Complete";
+
+            if (countdown <= 0f)
+            {
+                waveSpawned = true;
+                enemiesSpawned = 0;
+
+                SpawnNewWave();
+
+                countdown = TimeBetweenWaves;
+            }
+            else
+            {
+                SetDisplyText("", "Next Wave " + string.Format("{0:00}", Mathf.Clamp(countdown, 0f, Mathf.Infinity)));
+            }
+
+            countdown -= Time.deltaTime;
+
+            return;
+        }
+        else
+        {
+            SetDisplyText("Wave "+ (currentWaveNumber).ToString(), "Enemies Remaining " + (EnemiesRemaining () + (enemiesPerWave - enemiesSpawned)).ToString());
+        }
     }
 
-    // Start is called before the first frame update
-    void Start()
+    public virtual void StartNextWave()
     {
-        if (Enemies == null)
+        currentWaveNumber += 1;
+        enemiesPerWave = currentWaveNumber * enemiesPerWaveStart;
+        DayNightManager.Instance.SetNextInterval((currentWaveNumber) / 10f);
+        RestWaveDtl();
+    }
+
+    protected virtual void RestWaveDtl()
+    {
+        enemiesSpawned = 0f;
+        waveSpawned = false;
+        WavesEnabled = true;
+    }
+
+    protected virtual void SetDisplyText(string waveNumber, string displayText)
+    {
+
+    }
+
+    protected virtual void EndWaveCleanUp()
+    {
+        foreach (FloorData floor in spawnLocations)
         {
-            TraceManager.WriteTrace(TraceChannel.Main, TraceType.error, "Missing Enemy!");
-            return;
+            BaseFloor f = floor.GameObj.GetComponent<BaseFloor>();
+            if (f == null)
+                continue;
+
+            f.ResetFloorColor();
         }
+
+        enemiesSpawnedList.Clear();
+    }
+
+    protected virtual bool IsWaveComplete()
+    {
+        return enemiesSpawned >= enemiesPerWave && EnemiesRemaining() == 0;
+    }
+
+    protected virtual bool CanStart()
+    {
         BuildSpawnLocList();
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-
-        if (TotalWaves >= waveCount)
+        if (spawnLocations == null || spawnLocations.Count <= 0)
         {
-            waveCount = 0;
-            WavesEnabled = false;
+            return false;
         }
-
-        if (WavesEnabled && !WaveComplete())
-            return;
-
-        if (countdown <= 0f)
-        {
-            SpawnNewWave();
-            countdown = TimeBetweenWaves;
-        }
-
-        countdown -= Time.deltaTime;
-
-    }
-
-    private bool WaveComplete()
-    {
-
         return true;
     }
 
-    private void SpawnNewWave()
+    protected virtual bool CanContinue()
+    {
+        return CheckSpawnPathStillValide();
+    }
+
+    protected virtual int EnemiesRemaining()
+    {
+        int cnt = 0;
+        foreach (BaseEnemy e in enemiesSpawnedList)
+        {
+            if (e != null)
+                cnt++;
+        }
+
+        return cnt;
+    }
+
+    protected virtual void SpawnNewWave()
     {
         BuildSpawnLocList();
+        StartCoroutine(SelectEnemyToSpawn());
+    }
 
-        for (float i = 0; i < enemiesPerWave; i++)
+    IEnumerator SelectEnemyToSpawn()
+    {
+        ColorSpawnLocations();
+
+        while (WavesEnabled && enemiesSpawned < enemiesPerWave)
         {
-            SpawnEnemy(Enemies);
+            SpawnEnemy(GetEnemyToSpawn());
+            enemiesSpawned += 1;
+            yield return new WaitForSeconds(TimebetweenEnemies);
         }
     }
 
-    private void SpawnEnemy(GameObject NextEnemy)
+    protected void ColorSpawnLocations()
     {
+        foreach (FloorData floor in spawnLocations)
+        {
+            floor.GameObj.GetComponent<Renderer>().material.color = Color.red;
+        }
+    }
+
+    protected virtual void SpawnEnemy(GameObject NextEnemy)
+    {
+        if (NextEnemy == null)
+            return;
+
         BaseEnemy enemy = NextEnemy.GetComponent<BaseEnemy>();
         if (enemy == null)
         {
@@ -97,18 +208,58 @@ public class WaveSpawner : MonoBehaviour
         Vector3 EndPos = new Vector3(0f, .2f, 0f);
         Vector3 Direction = Vector3.forward;
 
-        FindEnemySpawn(ref StartPos, ref EndPos, ref Direction);
+        FindEnemySpawn(ref StartPos, ref EndPos, ref Direction, enemy.PositionOffset);
 
         enemy.StartPos = StartPos;
         enemy.EndPos = EndPos;
         enemy.Direction = Direction;
 
-        Instantiate(NextEnemy, StartPos, Quaternion.identity);
+        GameObject e = Instantiate(NextEnemy, StartPos, Quaternion.identity);
+        BaseEnemy be = e.GetComponent<BaseEnemy>();
+        if (be == null)
+        {
+            TraceManager.WriteTrace(TraceChannel.Main, TraceType.error, "BaseEnemy  not on object!");
+            return;
+        }
+
+        enemiesSpawnedList.Add(be);
+
     }
 
-    private void FindEnemySpawn(ref Vector3 StartPos, ref Vector3 EndPos,  ref Vector3 Direction)
+    protected GameObject GetEnemyToSpawn()
     {
-        StartPos = spawnLocations[RandomNumber(0, spawnLocations.Count - 1)].Location + new Vector3(0f, .2f, 0f);
+        float total = 0;
+        int waveMod = currentWaveNumber % 10;
+        if (waveMod == 0) waveMod = 10;
+
+        foreach (WaveEnemy we in Enemies)
+        {
+            if (!( waveMod >= we.ValideWaveMin && waveMod <= we.ValideWaveMax))
+                continue;
+
+            total += we.Probability;
+        }
+
+        float mRand = Random.value * total;
+
+        foreach(WaveEnemy we in Enemies)
+        {
+            if (!( waveMod >= we.ValideWaveMin && waveMod <= we.ValideWaveMax))
+                continue;
+
+            if (mRand < we.Probability)
+            {
+                return we.Enemy;
+            }
+            mRand -= we.Probability;
+        }
+
+        return null;
+    }
+
+    protected virtual void FindEnemySpawn(ref Vector3 StartPos, ref Vector3 EndPos,  ref Vector3 Direction, Vector3 EnimeyOffset)
+    {
+        StartPos = spawnLocations[RandomNumber(0, spawnLocations.Count - 1)].Location + EnimeyOffset;
         EndPos = StartPos;
         if (StartPos.x == 0f )
         {
@@ -132,63 +283,88 @@ public class WaveSpawner : MonoBehaviour
         }
     }
 
-    private void BuildSpawnLocList()
+    protected virtual bool CheckSpawnPathStillValide()
     {
-
-    maxX = (GameMapGenerator.Instance.XValue * GameMapGenerator.Instance.XbaseSize) - GameMapGenerator.Instance.XbaseSize;
-    maxZ = (GameMapGenerator.Instance.ZValue * GameMapGenerator.Instance.ZbaseSize) - GameMapGenerator.Instance.ZbaseSize;
-    spawnLocations = new List<MapLocation>();
-        foreach (List<MapLocation> mlist in GameMapGenerator.Instance.MapLocList)
+        foreach (FloorData loc in spawnLocations)
         {
-            foreach (MapLocation loc in mlist)
+            if (CheckForStructInPath(loc))
             {
-                //  find the border locations
-                if (loc.Location.x == 0f || loc.Location.z == 0f || loc.Location.x == maxX || loc.Location.z == maxZ)
-                {
-                    if (CheckForStructInPath(loc))
-                    {
-                        spawnLocations.Add(loc);
-                        loc.GameObj.GetComponent<Renderer>().material.color = Color.red;
-                    }
-                }
-            }
-        }
-    }
-
-    private bool CheckForStructInPath(MapLocation loc)
-    {
-
-        if (loc.Location.z == 0 || loc.Location.z == maxX)
-        {
-            float indexX = loc.Location.x / GameMapGenerator.Instance.XbaseSize;
-            foreach (MapLocation l in GameMapGenerator.Instance.MapLocList[(int)indexX])
-            {
-                BaseFloor floor = l.GameObj.GetComponent<BaseFloor>();
-                if (floor == null)
-                    continue;
-
-                if (floor.HasStructure()) return true;
-            }
-        }
-        else if (loc.Location.x == 0 || loc.Location.x == maxZ)
-        {
-            float indexZ = loc.Location.z / GameMapGenerator.Instance.ZbaseSize;
-            foreach (List<MapLocation> mlist in GameMapGenerator.Instance.MapLocList)
-            {
-                BaseFloor floor = mlist[(int)indexZ].GameObj.GetComponent<BaseFloor>();
-                if (floor == null)
-                    continue;
-
-                if (floor.HasStructure()) return true;
+                return true;
             }
         }
 
         return false;
     }
 
-    public int RandomNumber(int min, int max)
+    protected virtual void BuildSpawnLocList()
+    {
+        if (GameMapGenerator.Instance.data == null || GameMapGenerator.Instance.MapLocList == null) return;
+
+        maxX = (GameMapGenerator.Instance.data.XValue * GameMapGenerator.Instance.data.XbaseSize) - GameMapGenerator.Instance.data.XbaseSize;
+        maxZ = (GameMapGenerator.Instance.data.ZValue * GameMapGenerator.Instance.data.ZbaseSize) - GameMapGenerator.Instance.data.ZbaseSize;
+        spawnLocations = new List<FloorData>();
+        foreach (List<FloorData> mlist in GameMapGenerator.Instance.MapLocList)
+        {
+            foreach (FloorData loc in mlist)
+            {
+                //  find the border locations
+                if (loc.Location.x == 0f || loc.Location.z == 0f || loc.Location.x == maxX || loc.Location.z == maxZ)
+                {
+                    if (CheckForStructInPath(loc))
+                    {
+                        spawnLocations.Add(loc);                    
+                    }
+                }
+            }
+        }
+    }
+
+    protected virtual bool CheckForStructInPath(FloorData loc)
+    {
+
+        if (loc.Location.z == 0 || loc.Location.z == maxX)
+        {
+            float indexX = loc.Location.x / GameMapGenerator.Instance.data.XbaseSize;
+            foreach (FloorData l in GameMapGenerator.Instance.MapLocList[(int)indexX])
+            {
+                BaseFloor floor = l.GameObj.GetComponent<BaseFloor>();
+                if (floor == null)
+                    continue;
+
+                if (floor.HasActiveStructure()) return true;
+            }
+        }
+        else if (loc.Location.x == 0 || loc.Location.x == maxZ)
+        {
+            float indexZ = loc.Location.z / GameMapGenerator.Instance.data.ZbaseSize;
+            foreach (List<FloorData> mlist in GameMapGenerator.Instance.MapLocList)
+            {
+                BaseFloor floor = mlist[(int)indexZ].GameObj.GetComponent<BaseFloor>();
+                if (floor == null)
+                    continue;
+
+                if (floor.HasActiveStructure()) return true;
+            }
+        }
+
+        return false;
+    }
+
+    public int LastWaveNumber { get { return currentWaveNumber - 1; } }
+    public int CurrentWaveNumber { get { return currentWaveNumber; } }
+
+    protected int RandomNumber(int min, int max)
     {
         System.Random rand = new System.Random();
         return rand.Next(min, max);
     }
+}
+
+[System.Serializable]
+public class WaveEnemy
+{
+    public GameObject Enemy;
+    public float Probability;
+    public int ValideWaveMin;
+    public int ValideWaveMax;
 }

@@ -5,60 +5,103 @@ using UnityEngine.EventSystems;
 
 public class BaseFloor : BaseEnvironment
 {
+    public FloorData data;
+
+    private BaseStructure structure;
     private Color startColor;
     private Color hoverColor;
+    private Color errorColor;
     private Renderer rend;
 
-    public GameObject Structure;
+    public Vector3 positionOffset;
 
-    void Start()
+    void Awake()
     {
         rend = GetComponent<Renderer>();
         startColor = rend.material.color;
         hoverColor = Color.gray;
+        errorColor = Color.red;
+    }
+
+    public void SetData(ref FloorData d)
+    {
+        data = d;
     }
 
     public bool HasStructure()
     {
-        return Structure != null;
+        return structure != null && structure.Type != GaneObjectType.None;
     }
 
-    void OnMouseDown()
+    public bool HasActiveStructure()
     {
+        return structure != null && !structure.IsDestroyed && structure.Type != GaneObjectType.None;
+    }
 
-        if (EventSystem.current.IsPointerOverGameObject())
-            return;
+    public void SetStructure(BaseStructure s)
+    {
+        structure = s;
+        data.Structure.ID = s.ID;
+        data.Structure.Type = s.Type;
+    }
 
+    public void ClearStructure()
+    {
+        structure = null;
+        data.Structure = new StructureInfoData();
+    }
+
+    public Vector3 GetBuildPosition()
+    {
+        return transform.position + positionOffset;
+    }
+
+    #region Selection
+    protected override void Selected()
+    {
         if (HasStructure())
         {
-            TraceManager.WriteTrace(TraceChannel.Main, TraceType.info, "TODO REMOVE /  UPDATE");
+            base.Selected();
             return;
         }
 
-        Structure = BuildManager.Instance.GetStructureToBuild();
-        if (Structure == null)
+        if (!BuildManager.Instance.CanBuild())
         {
-            TraceManager.WriteTrace(TraceChannel.Main, TraceType.error, "No Structrue to build");
+            base.Selected();
             return;
         }
-        Instantiate(Structure, transform.position + new Vector3(0f,.2f,0f), transform.rotation);
+
+        BuildManager.Instance.BuildStructure(this);
     }
 
-    void OnMouseEnter()
+    protected override void MouseEnter()
     {
-        if (EventSystem.current.IsPointerOverGameObject())
-            return;
-
-        //TraceManager.WriteTrace(TraceChannel.Main, TraceType.info, "OnMouseEnter");
-        if (BuildManager.Instance.GetStructureToBuild() == null)
-            return;
-
-        rend.material.color = hoverColor;
+        if (BuildManager.Instance.BuildSelected())
+        {
+            if (!BuildManager.Instance.CanBuild())
+            {
+                rend.material.color = errorColor;
+            }
+            else
+            {
+                BuildManager.Instance.TempBuildStructure(this);
+                rend.material.color = hoverColor;
+            }
+        }
     }
 
-    void OnMouseExit()
+    protected override void MouseExit()
     {
-        //TraceManager.WriteTrace(TraceChannel.Main, TraceType.info, "OnMouseExit");
+        if (BuildManager.Instance.BuildSelected())
+        {
+            BuildManager.Instance.TempBuildStructureRemove();
+        }
+        ResetFloorColor();
+    }
+
+    public void ResetFloorColor()
+    {
         rend.material.color = startColor;
     }
+    #endregion
 }
